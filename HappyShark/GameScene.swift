@@ -15,58 +15,52 @@ struct PhysicsCategory {
   static let projectile: UInt32 = 0b10      // 2
 }
 
-//func +(left: CGPoint, right: CGPoint) -> CGPoint {
-//  return CGPoint(x: left.x + right.x, y: left.y + right.y)
-//}
-//
-//func -(left: CGPoint, right: CGPoint) -> CGPoint {
-//  return CGPoint(x: left.x - right.x, y: left.y - right.y)
-//}
-//
-//func *(point: CGPoint, scalar: CGFloat) -> CGPoint {
-//  return CGPoint(x: point.x * scalar, y: point.y * scalar)
-//}
-//
-//func /(point: CGPoint, scalar: CGFloat) -> CGPoint {
-//  return CGPoint(x: point.x / scalar, y: point.y / scalar)
-//}
-//
-//#if !(arch(x86_64) || arch(arm64))
-//  func sqrt(a: CGFloat) -> CGFloat {
-//    return CGFloat(sqrtf(Float(a)))
-//  }
-//#endif
-//
-//extension CGPoint {
-//  func length() -> CGFloat {
-//    return sqrt(x*x + y*y)
-//  }
-//
-//  func normalized() -> CGPoint {
-//    return self / length()
-//  }
-//}
+enum GameState {
+    case showingLogo
+    case playing
+    case dead
+}
 
 class GameScene: SKScene, SKPhysicsContactDelegate {
     
+    var backgroundMusic: SKAudioNode!
+    
     private var label : SKLabelNode?
     private var spinnyNode : SKShapeNode?
+    var scoreLabel: SKLabelNode!
     
-    let player = SKSpriteNode(imageNamed: "fishShark.png")
+    var player: SKSpriteNode!
+    var logo: SKSpriteNode!
+    var gameOver: SKSpriteNode!
+    var gameState = GameState.showingLogo
     
+    var score = 0 {
+        didSet {
+            scoreLabel.text = "SCORE: \(score)"
+        }
+    }
+
     let backgroundTexture = SKTexture(imageNamed: "background")
     let groundTexture = SKTexture(imageNamed: "sand")
     
-    let sound = SKAction.playSoundFileNamed("sound.wav", waitForCompletion: false)
+//    let sound = SKAction.playSoundFileNamed("bensound-ukulele.wav", waitForCompletion: false)
     
     override func didMove(to view: SKView) {
+        
+        if let musicURL = Bundle.main.url(forResource: "bensound-ukulele", withExtension: "wav") {
+            backgroundMusic = SKAudioNode(url: musicURL)
+            addChild(backgroundMusic)
+        }
+        
+        createPlayer()
+        createLogos()
+        
+        createScore()
         
         physicsWorld.gravity = .zero
         physicsWorld.contactDelegate = self
         
         backgroundColor = SKColor.gray
-        player.position = CGPoint(x: size.width / 2 + 400, y: size.height / 2)
-        addChild(player)
         
         createBackground()
         createGroundLayer()
@@ -77,17 +71,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
                 SKAction.wait(forDuration: 2.0)
             ])
         ))
-
-        run(SKAction.repeatForever(
-            SKAction.sequence([
-                SKAction.run(addEnemyFish),
-                SKAction.wait(forDuration: 1.0)
-            ])
-        ))
-        
-        let backgroundMusic = SKAudioNode(fileNamed: "background-music-aac.caf")
-        backgroundMusic.autoplayLooped = true
-        addChild(backgroundMusic)
     }
     
     
@@ -130,12 +113,36 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 //    }
     
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        run(sound)
+        switch gameState {
+        case .showingLogo:
+            gameState = .playing
+
+            let fadeOut = SKAction.fadeOut(withDuration: 0.5)
+            let remove = SKAction.removeFromParent()
+            let wait = SKAction.wait(forDuration: 0.5)
+            let activatePlayer = SKAction.run { [unowned self] in
+                self.player.physicsBody?.isDynamic = true
+                self.startEnemies()
+            }
+
+            let sequence = SKAction.sequence([fadeOut, wait, activatePlayer, remove])
+            logo.run(sequence)
+
+        case .playing:
+            player.physicsBody?.velocity = CGVector(dx: 0, dy: 0)
+//            player.physicsBody?.applyImpulse(CGVector(dx: 0, dy: 20))
+
+        case .dead:
+            break
+        }
     }
-    
-    override func update(_ currentTime: TimeInterval) {
-        // Called before each frame is rendered
-    }
+
+//    override func update(_ currentTime: TimeInterval) {
+//        // Called before each frame is rendered
+//        let value = player.physicsBody!.velocity.dy * 0.001
+//        let rotate = SKAction.rotate(toAngle: value, duration: 0.1)
+//        player.run(rotate)
+//    }
     
     func random() -> CGFloat {
         return CGFloat(Float(arc4random()) / 0xFFFFFFFF)
@@ -144,11 +151,46 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     func random(min: CGFloat, max: CGFloat) -> CGFloat {
         return random() * (max - min) + min
     }
+    
+    func createPlayer() {
+        let playerTexture = SKTexture(imageNamed: "fishShark.png")
+        player = SKSpriteNode(texture: playerTexture)
+        player.zPosition = 10
+        player.position = CGPoint(x: size.width / 2 + 400, y: size.height / 2)
+        
+        player.physicsBody = SKPhysicsBody(texture: playerTexture, size: playerTexture.size())
+        player.physicsBody!.contactTestBitMask = player.physicsBody!.collisionBitMask
+        player.physicsBody?.isDynamic = true
+//        player.physicsBody?.collisionBitMask = 0
+        
+        addChild(player)
+        
+        let frame2 = SKTexture(imageNamed: "fishShark.png")
+        let frame3 = SKTexture(imageNamed: "fishShark.png")
+        let animation = SKAction.animate(with: [playerTexture, frame2, frame3, frame2], timePerFrame: 0.01)
+        let runForever = SKAction.repeatForever(animation)
 
+        player.run(runForever)
+    }
+    
+    func startEnemies() {
+        run(SKAction.repeatForever(
+            SKAction.sequence([
+                SKAction.run(addEnemyFish),
+                SKAction.wait(forDuration: 1.0)
+            ])
+        ))
+    }
+    
     func addEnemyFish() {
-        let enemyFish = SKSpriteNode(imageNamed: "orangeFish.png")
+        let enemyFishTexture = SKTexture(imageNamed: "orangeFish.png")
+        let enemyFish = SKSpriteNode(texture: enemyFishTexture)
         let actualY = random(min: enemyFish.size.height / 2, max: size.height - enemyFish.size.height / 2)
         enemyFish.position = CGPoint(x: enemyFish.size.width / 2, y: actualY)
+        
+        enemyFish.physicsBody = SKPhysicsBody(texture: enemyFishTexture, size: enemyFishTexture.size())
+        enemyFish.physicsBody?.isDynamic = false
+        
         addChild(enemyFish)
 
         let actualDuration = random(min: CGFloat(2.0), max: CGFloat(4.0))
@@ -201,7 +243,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             let ground = SKSpriteNode(texture: groundTexture)
             ground.zPosition = -10
             ground.position = CGPoint(x: (groundTexture.size().width / 2.0 - (groundTexture.size().width * CGFloat(i))), y: groundTexture.size().height / 2)
-
+            
+            ground.physicsBody = SKPhysicsBody(texture: ground.texture!, size: ground.texture!.size())
+            ground.physicsBody?.isDynamic = false
+            
             addChild(ground)
 
             let moveRight = SKAction.moveBy(x: groundTexture.size().width, y: 0, duration: 25)
@@ -214,12 +259,17 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
     func createCastleGround() {
-        let castle = SKSpriteNode(imageNamed: "sandCastle")
+        let castleTexture = SKTexture(imageNamed: "sandCastle")
+        let castle = SKSpriteNode(texture: castleTexture)
         let actualY = castle.size.height / 2 - 110
         
 //        castle.zPosition = -20
         castle.position = CGPoint(x: 0, y: actualY)
         castle.scale(to: CGSize(width: 300, height: 300))
+        
+        castle.physicsBody = SKPhysicsBody(texture: castleTexture, size: castleTexture.size())
+        castle.physicsBody?.isDynamic = false
+        
         addChild(castle)
 
         let actualDuration = CGFloat(12.5)
@@ -262,5 +312,27 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         ))
         
         createGround()
+    }
+    
+    func createScore() {
+        scoreLabel = SKLabelNode(fontNamed: "Optima-ExtraBlack")
+        scoreLabel.fontSize = 24
+
+        scoreLabel.position = CGPoint(x: frame.midX, y: frame.maxY - 60)
+        scoreLabel.text = "SCORE: 0"
+        scoreLabel.fontColor = UIColor.black
+
+        addChild(scoreLabel)
+    }
+    
+    func createLogos() {
+        logo = SKSpriteNode(imageNamed: "Netflix-1")
+        logo.position = CGPoint(x: frame.midX, y: frame.midY)
+        addChild(logo)
+
+        gameOver = SKSpriteNode(imageNamed: "Netflix-1")
+        gameOver.position = CGPoint(x: frame.midX, y: frame.midY)
+        gameOver.alpha = 0
+        addChild(gameOver)
     }
 }
